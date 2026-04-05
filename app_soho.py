@@ -6,16 +6,16 @@ from google.oauth2 import service_account
 from datetime import datetime
 import io
 
-# --- CONFIGURAÇÕES ---
+# --- 1. CONFIGURAÇÕES (TROQUE APENAS O ID DA PASTA) ---
 ID_PASTA_DRIVE = "1L1cpeSdaauhGlFE7e-qBzl6d4RaFWKJ7"
 ID_PLANILHA = "12OAsmeEE9DcDbvLlQhI_Tw85UYTa6dk2Tn7YhN-sjs4"
 
-# Função para conectar com as APIs do Google
+# Função para autenticar
 def get_gcp_creds():
     creds_dict = st.secrets["gcp_service_account"]
     return service_account.Credentials.from_service_account_info(creds_dict)
 
-# --- FUNÇÃO: UPLOAD PARA DRIVE ---
+# --- 2. FUNÇÕES DE APOIO ---
 def upload_para_drive(arquivo_pdf, nome_arquivo):
     try:
         creds = get_gcp_creds()
@@ -23,12 +23,11 @@ def upload_para_drive(arquivo_pdf, nome_arquivo):
         file_metadata = {'name': nome_arquivo, 'parents': [ID_PASTA_DRIVE]}
         media = MediaIoBaseUpload(io.BytesIO(arquivo_pdf.read()), mimetype='application/pdf', resumable=True)
         file = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
-        return file.get('webViewLink') # Retorna o link direto do arquivo
+        return file.get('webViewLink')
     except Exception as e:
         st.error(f"Erro no Drive: {e}")
         return None
 
-# --- FUNÇÃO: ESCREVER NA PLANILHA ---
 def salvar_na_planilha(dados):
     try:
         creds = get_gcp_creds()
@@ -45,39 +44,37 @@ def salvar_na_planilha(dados):
         st.error(f"Erro na Planilha: {e}")
         return False
 
-# --- INTERFACE ---
-st.title("🏗️ Gestão de Manutenção Soho")
+# --- 3. INTERFACE ---
+st.set_page_config(page_title="Soho Manutenção", page_icon="🏗️")
+st.title("🏗️ Gestão Soho - Manutenção")
 
-# Lendo equipamentos (Modo Leitura)
-url_csv = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/export?format=csv"
-df = pd.read_csv(url_csv)
-lista_tags = df.iloc[:, 0].dropna().unique().tolist() # Pega a primeira coluna da planilha
+# Tentar carregar equipamentos da planilha
+try:
+    url_csv = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/export?format=csv"
+    df_equip = pd.read_csv(url_csv)
+    # Pega a coluna que contém as TAGS (ajuste se não for a primeira)
+    lista_tags = df_equip.iloc[:, 0].dropna().unique().tolist()
+except:
+    lista_tags = ["Bomba de Recalque", "Gerador", "Piscina"]
 
-equipamento = st.selectbox("Equipamento:", lista_tags)
-relato = st.text_area("O que foi feito?")
-arquivo_pdf = st.file_uploader("Upload do Laudo (PDF)", type=["pdf"])
+equipamento = st.selectbox("Selecione o Equipamento:", lista_tags)
+relato = st.text_area("Descreva o serviço realizado:")
+arquivo_pdf = st.file_uploader("Anexe o Laudo em PDF", type=["pdf"])
 
-if st.button("Finalizar e Salvar"):
+if st.button("Finalizar e Registrar"):
     if relato and arquivo_pdf:
-        with st.spinner('Processando...'):
+        with st.spinner('Salvando no sistema...'):
             data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
             nome_arq = f"Laudo_{equipamento}_{datetime.now().strftime('%d%m%Y_%H%M')}.pdf"
             
-            # 1. Sobe o PDF e pega o link
             link_drive = upload_para_drive(arquivo_pdf, nome_arq)
             
             if link_drive:
-                # 2. Salva a linha na planilha
-                dados_linha = [data_atual, equipamento, relato, link_drive]
-                sucesso = salvar_na_planilha(dados_linha)
-                
+                sucesso = salvar_na_planilha([data_atual, equipamento, relato, link_drive])
                 if sucesso:
-                    st.success("✅ Tudo salvo! Planilha e Drive atualizados.")
+                    st.success("✅ Registro concluído com sucesso!")
                     st.balloons()
+            else:
+                st.error("Falha ao gerar link do PDF.")
     else:
-        st.warning("Preencha o relato e anexe o PDF.")
-    else:
-        st.warning("⚠️ Por favor, preencha a descrição do serviço.")
-
-st.divider()
-st.caption("Versão 1.2 - Suporte a anexos PDF")
+        st.warning("Preencha o relato e anexe o arquivo.")
